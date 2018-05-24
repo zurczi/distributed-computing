@@ -34,21 +34,33 @@ vector<queue_str> queue_proc;
 int dearray[K]; //liczba zatrudnionych debili w Kampanii
 int accept=0;
 int wait_cs=0;
+
 int myrank;
 
 bool my_compare(queue_str str_A,  queue_str str_B){
-	return str_A.lamport < str_B.lamport;
-	
+		if (str_A.lamport < str_B.lamport)
+			return str_A.lamport < str_B.lamport;
+
+		if (str_A.lamport == str_B.lamport)
+			return str_A.proc_nr < str_B.proc_nr;
+		else
+			return str_A.lamport < str_B.lamport;
 }
-void print_queue(){
+
+
+
+void print_queue(int j){
     pthread_mutex_lock(&queue_mutex);
-    
+    pthread_mutex_lock(&myrank_mutex);
+	if(j==0){
+		cout<<"Po usunieciu"<<endl;}else cout<<"po dodaniu"<<endl;
     for(unsigned int i = 0; i < queue_proc.size(); i++ )
     {
         
-        cout << "Kolejka Lamport: " << queue_proc[ i ].lamport << " nr proc:  " << queue_proc[ i ].proc_nr  << endl;
+        cout << "Kolejka nr "<<myrank<<"Lamport: " << queue_proc[ i ].lamport << " nr proc:  " << queue_proc[ i ].proc_nr  << "\n";
     }
-    pthread_mutex_unlock(&queue_mutex);
+pthread_mutex_unlock(&myrank_mutex);
+    pthread_mutex_unlock(&queue_mutex); 
 }
 
 int mymin()
@@ -111,7 +123,7 @@ void *receive_loop(void * arg) {
                 printf("Lamport: %d . Wpisałem do kolejki:%d Moj nr: %d\n",lamport , status.MPI_SOURCE,myrank);
                 pthread_mutex_unlock(&myrank_mutex);
                 
-                print_queue();
+                print_queue(1);
                 
                 pthread_mutex_lock(&send_mutex);
                 MPI_Send(&msgS, 2, MPI_INT, status.MPI_SOURCE, REP, MPI_COMM_WORLD);
@@ -125,11 +137,11 @@ void *receive_loop(void * arg) {
                 
             case REP:
                 
-                if(lamport < msg[0]){
+                
                     pthread_mutex_lock(&ac_mutex);
                     accept+=1;
                     pthread_mutex_unlock(&ac_mutex);
-                    }
+      
                     
                 pthread_mutex_lock(&myrank_mutex);
                 printf("Lamport: %d. My Lamport: %d.Odebrałem REP od %d Moj nr: %d \n",msg[0],lamport, status.MPI_SOURCE,myrank);
@@ -145,8 +157,10 @@ void *receive_loop(void * arg) {
                 
                 pthread_mutex_lock(&queue_mutex);
                 queue_proc.erase(queue_proc.begin());
+		
                 pthread_mutex_unlock(&queue_mutex);
-                
+
+                print_queue(0);
                 pthread_mutex_lock(&myrank_mutex);
                 printf("Lamport: %d . Odebrałem CONF od %d Moj nr: %d . \n",msg[0], status.MPI_SOURCE,myrank);
                 pthread_mutex_unlock(&myrank_mutex);
@@ -157,6 +171,7 @@ void *receive_loop(void * arg) {
 }
 }
 bool wer_accept(){
+	
         pthread_mutex_lock(&ac_mutex);
         if(accept<size){
             pthread_mutex_unlock(&ac_mutex);
@@ -167,17 +182,20 @@ bool wer_accept(){
 }
 
 bool wer_queue(){
-    
+    	
         pthread_mutex_lock(&queue_mutex);
         pthread_mutex_lock(&myrank_mutex);
         
         if(queue_proc[0].proc_nr!=myrank){
-            pthread_mutex_unlock(&queue_mutex);
-            pthread_mutex_unlock(&myrank_mutex);
+            
+            pthread_mutex_unlock(&myrank_mutex); /////// ----------------jak tu znowu z kolejnoscia
+pthread_mutex_unlock(&queue_mutex);
             return false;
         }
             else{
-                pthread_mutex_unlock(&queue_mutex);
+                
+		pthread_mutex_unlock(&myrank_mutex);
+pthread_mutex_unlock(&queue_mutex);
                 return true;
         }
 }
@@ -203,7 +221,7 @@ int main(int argc, char **argv)
     int msg[2];
     
     while(1){
-        //wysyłam req najpierw
+       
         if(wait_cs==0){
             
             increment_lamport(lamport);
@@ -221,10 +239,17 @@ int main(int argc, char **argv)
             wait_cs=1;
             }
             
-        else if(wer_accept() && wer_queue()){
-            //dopoki wszyscy nie odesla ok 
-            int index=mymin();
+
+        else {
+
+		if(wer_accept() == true )
+		if(wer_queue() == true){
+		
             
+	    pthread_mutex_lock(&array_mutex);
+            int index=mymin();
+            pthread_mutex_unlock(&array_mutex);
+
             increment_lamport(lamport);
             msg[0]=lamport;
             msg[1]=index;
@@ -235,7 +260,7 @@ int main(int argc, char **argv)
                 MPI_Send(&msg, 2, MPI_INT, i, CONF, MPI_COMM_WORLD);
                 
                 pthread_mutex_lock(&myrank_mutex);
-                printf("Lamport: %d . Wysłałem CONF.  Moj nr:%d \n",lamport,myrank);
+                printf("Lamport: %d . Wysłałem CONF do %d.  Moj nr:%d \n",lamport,i,myrank);
                 pthread_mutex_unlock(&myrank_mutex);
             }
             pthread_mutex_unlock(&send_mutex);
@@ -247,9 +272,9 @@ int main(int argc, char **argv)
             pthread_mutex_lock(&myrank_mutex);
             printf("Lamport: %d . ZATRUDNILEM W FIRMIE NR  %d. Teraz się drzemne. Moj nr: %d \n",lamport, index,myrank);
             pthread_mutex_unlock(&myrank_mutex);
-            //sleep(3);
+            sleep(3);
             wait_cs=0;
-        }
+        }}
     }
     MPI_Finalize();
     return 0;
